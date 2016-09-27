@@ -1,0 +1,17 @@
+High Level Approach:
+- We started code by creating method to read arguments from command line and extracted the hostname and NUID. 
+- Created different methods, one for regualar socket connection and other for SSL socket.
+- With port number , hostname from arguments created socket and sent the message to server.
+- Ran the loop until we received the BYE message from server and printed the flag.
+
+Challenges:
+We have not faced any challenges
+
+Testing Code:
+Tested code using different scenaraios.
+- Verified whether it returned Unknown_Husky_ID where it did not recognize the husky id.
+- Made sure that the message from servers are valid and can the expressions can be solved.
+- Handled all possible exceptions like if user did not enter port number after -p, hostname or neu id etc
+
+Extra Credit:
+Did extra credit too

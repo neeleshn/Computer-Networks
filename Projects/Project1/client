@@ -1,0 +1,105 @@
+#!/usr/bin/python
+import socket, sys, getopt,ssl # importing libraries
+
+def readArgs(): # reads command line arguments
+	global port, connect_ssl, hostname, message
+	try:
+		host_index = 1
+		opts,args = getopt.getopt(sys.argv[1:], "p:s")
+		for opt, optarg in opts:
+			if opt == "-p":
+				port = int(optarg)
+				host_index += 2
+			
+			if opt == "-s":
+				if host_index == 1 :
+					port = 27994
+				host_index += 1
+				connect_ssl = True
+
+		hostname = sys.argv[host_index] # get the index of hostname from arguments and read it.
+		message = "cs5700fall2016 HELLO %s\n"%sys.argv[host_index+1] # get the index of neu id from arguments and read it
+			
+	except :
+		print 'Usage : ./client <-p port> <-s> [hostname] [neu id]'
+		sys.exit(2)
+
+
+def getSslSocket() : # create an SSL Socket
+	k = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	k.settimeout(10)
+	s = ssl.wrap_socket(k)
+	return s
+
+
+def getSocket() : # create a regular socket
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	return s
+
+
+def solveExpression(splitData) :
+	result = ""
+	try : # solve expressions
+		if splitData[3] == "+" :
+			result = int(splitData[2]) + int(splitData[4])
+		elif splitData[3] == "-" :
+			result = int(splitData[2]) - int(splitData[4])
+		elif splitData[3] == "*" :
+			result = int(splitData[2]) * int(splitData[4])
+		elif splitData[3] == "/" :
+			result = int(int(splitData[2]) / int(splitData[4]))
+		else :
+			print "Expressions from server are not in proper format"
+
+	except :
+		print "Expressions from server are not in proper format"
+
+	return result
+
+
+
+if __name__ == "__main__" : 
+
+	port = 27993 # default port number
+	buffer_size = 256 #default buffer size
+	connect_ssl = False # ssl connection check.
+	readArgs() # read arguments
+
+	if connect_ssl :
+		sock = getSslSocket()
+	else :
+		sock = getSocket()
+
+	try: # connect to socket and check connection.
+		sock.connect((hostname, port))
+	except socket.error:
+		print "Unable to connect. Check hostname and port"
+		sys.exit(2)
+
+	while True : # loop, solve the expressions and send solution back to server 
+		sock.send(message) # send message to server
+		data = sock.recv(buffer_size) # receive data from server
+		splitData = data.split(" ")
+		
+		if splitData[0] != "cs5700fall2016" : # check format of server response
+			print "Expression from Server is not valid"
+			break
+
+		if splitData[2] == "BYE\n" : # print flag and break the loop if bye message is received.
+			print splitData[1]
+			break
+		
+		if splitData[1] != "STATUS" : # if the server doesn't return bye or status it is an error.
+			print "Expression from Server is not STATUS"
+			break
+
+		solution = solveExpression(splitData) # solve expressions from server
+		
+		if solution == "" :
+			break
+		else : 
+			message = "cs5700fall2016 " + str(solveExpression(splitData)) + "\n" #solution to send back to server.
+
+
+	sock.close() # close socket
+
