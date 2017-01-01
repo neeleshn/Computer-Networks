@@ -1,0 +1,159 @@
+#!/usr/bin/python
+
+# imports
+import urllib2, sys, sqlite3, zlib
+from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+from sets import Set
+from datetime import datetime
+from subprocess import check_output
+
+# handles http get requests
+class Http_Handler(BaseHTTPRequestHandler):
+    
+    # checks if the usage of disk is above 10mb
+    def disk_overutilized(self,data_len):
+        disk_use = int(check_output(["du","-b"]).strip("\t.\n"))
+        return disk_use+data_len>9500000
+	
+    # prints the current state of cache, disk and memory
+    def print_cache(self):
+        global conn, local_cache
+        print "\nDISK SIZE : "+check_output(["du","-b"]).strip("\t.\n")
+        print "Local Cache Size: "+str(len(local_cache))
+        cur = conn.cursor()
+        cur.execute("select path,count,entry_time from LOCAL_CACHE;")
+        for row in cur:
+            print row
+        conn.commit()
+        print "\n\n"
+
+    # evicts from cache if disk is over utilized
+    def evict_from_cache(self):
+        global conn, path_count_map, local_cache
+			
+        if len(local_cache)<2:
+			return
+		
+        # gets the least recently used path among the least frequency
+        cur = conn.cursor()
+        query_result = cur.execute("SELECT PATH FROM LOCAL_CACHE WHERE COUNT ="+ 
+        "(SELECT MIN(COUNT) FROM LOCAL_CACHE)"+
+        "ORDER BY ENTRY_TIME ASC LIMIT 1;")
+        del_url = query_result.fetchone()[0]
+        conn.commit()
+		
+        # delete the data of the that path from db and local_cache set
+        # but dont delete from path_count_map to restore frequency
+        cur = conn.cursor()
+        cur.execute("DELETE FROM LOCAL_CACHE WHERE PATH=?;",(del_url,))
+        local_cache.remove(del_url)
+        conn.commit()
+		
+    # if a url is hit more than 2 times then it is stored in cache
+    def can_be_stored_in_cache(self,count):
+        return count>2
+    		
+    # insert path,data,frequency and timestamp in db
+    def insert_into_cache(self, comp_data):
+        global conn, local_cache
+        local_cache.add(self.path)
+        cur = conn.cursor()
+        cur.execute("INSERT INTO LOCAL_CACHE (PATH,DATA,COUNT,ENTRY_TIME) VALUES (?,?,?,?);",
+        (self.path, buffer(comp_data), path_count_map[self.path], datetime.now()))
+        conn.commit()
+        
+    # update the frequency and timestamp of the path in db
+    def update_cache(self):
+        global path_count_map, conn
+        cur = conn.cursor()
+        cur.execute("UPDATE LOCAL_CACHE SET COUNT=?, ENTRY_TIME=? WHERE PATH=?;",
+        (path_count_map[self.path],datetime.now(),self.path))
+        conn.commit()
+        
+    # store data in cache if neccessary
+    def store_in_cache(self,data):
+        global conn,path_count_map,local_cache
+        
+        # update frequency of path
+        if self.path in path_count_map:
+            path_count_map[self.path]+=1
+        else:
+            path_count_map[self.path]=1
+        
+        # if not in cache, store in cache if frequency > 2
+        if self.path not in local_cache:
+            if self.can_be_stored_in_cache(path_count_map[self.path]):
+                comp_data = zlib.compress(data)
+                while self.disk_overutilized(len(comp_data)):
+                    self.evict_from_cache()
+                self.insert_into_cache(comp_data)
+        else:
+            # update frequency if present in cache
+            self.update_cache()
+    
+    # get data from db in available in db
+    def get_from_cache(self):
+        global conn
+        cur = conn.cursor()
+        query_result = cur.execute("SELECT DATA FROM LOCAL_CACHE WHERE PATH=?;",(self.path,))
+        data = zlib.decompress(query_result.fetchone()[0])
+        conn.commit()
+        return data
+    
+    # get data from origin server if not available in cache
+    def download_from_origin(self):
+        req_url = "http://"+origin+":8080"+str(self.path)
+        return urllib2.urlopen(req_url).read()
+
+    # send data to client and close connections
+    def send_and_end(self,data):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(data)
+            
+    # handle all http get requests
+    def do_GET(self):
+        global origin,path_count_map, local_cache
+        
+        try:
+            # if available in cache, get from cache else download from origin
+            if self.path in local_cache :
+                data=self.get_from_cache()
+            else :
+                data=self.download_from_origin()
+            
+            # send data to client and close connections
+            self.send_and_end(data)
+            # store in cache in neccesary
+            self.store_in_cache(data)
+            #self.print_cache()
+            
+        except Exception as msg:
+            # send 404 in case of invalid url
+            # print msg
+            self.send_error(404,"Not Found")
+         
+        
+if __name__ == "__main__":
+    global origin,conn,path_count_map,local_cache
+    path_count_map = {}  # dictionary to store path and its frequency
+    local_cache = Set()  # set to store paths present in cache
+    origin = sys.argv[4] # origin server to download from
+
+    # create db with schema- path, data, frequency and timestamp
+    conn = sqlite3.connect("local_cache.db")
+    conn.execute("pragma auto_vacuum = full;")
+    conn.execute("CREATE TABLE IF NOT EXISTS LOCAL_CACHE"+ 
+    "(PATH TEXT, DATA TEXT, COUNT INTEGER, ENTRY_TIME DATETIME);")
+    
+    #http server to handle get requests
+    http_server = HTTPServer(("", int(sys.argv[2])), Http_Handler)
+    try:
+        http_server.serve_forever()
+    except KeyboardInterrupt:
+        # close connections and shutdown server
+        conn.close()
+        http_server.shutdown()
+        
+

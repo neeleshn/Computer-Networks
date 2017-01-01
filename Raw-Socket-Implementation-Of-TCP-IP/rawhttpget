@@ -1,0 +1,298 @@
+#!/usr/bin/python
+import socket, sys, os
+from struct import *
+from TcpHeader import TcpHeader
+from IpHeader import IpHeader
+import time
+
+class RawHttpGet :
+
+	url = "" # argument url
+	cwnd=1 # congestion window
+	relative_path = "" # relative path in url
+	hostname = "" # hostname in the url
+	filename = "" # filename to be downloaded
+	source_port = 80 # source port with be configured later
+	dest_port = 80 # dest port
+	mss = 1460
+	source_ip="" # source ip will be set later
+	dest_ip="" # dest ip is the ip of the url argument provided
+	ip_id=54321 # ip packet id sequence
+	close_flag = 0 # flag for fin ack
+	close_seq = 0 # seq no of fin ack packet
+	close_ack = 0 # ack no of fin ack packet
+	sendSock = None # socket to send packets
+	recvSock = None # socket to receive packets
+	packetDict = {} # dict of seq no to data in each packet
+	prevPacket = None # store previous packet to resend if ACK not received
+	
+	# checksum functions needed for calculation checksum
+	def getchecksum(self,msg):
+		s = 0
+		if ((len(msg) % 2) != 0):
+			for i in range(0, len(msg) - 1, 2):
+				w = ord(msg[i]) + (ord(msg[i + 1]) << 8)
+				s += w
+			s += socket.ntohs(0xFF00) & (ord(msg[(len(msg)-1)]))
+		else:
+			for i in range(0, len(msg), 2):
+				w = ord(msg[i]) + (ord(msg[i + 1]) << 8)
+				s += w
+				
+		s = (s >> 16) + (s & 0xffff)
+		s += (s >> 16)
+		s = ~s & 0xffff
+		return s
+		
+		
+	# verify checksum after receiving packets
+	def verifyChecksum(self, packet):
+		
+		ipHead=packet[0:20]
+		ipHdr = unpack("!2sH8s4s4s",ipHead)
+		pack_len = ipHdr[1]-40
+
+		ipHeader=packet[0:20]
+		ip_header=unpack("!BBHHHBBH4s4s",ipHeader)
+		placeholder = 0
+		tcp_length = ip_header[2] - 20
+		protocol = ip_header[6]
+		source_ip=ip_header[8]
+		dest_ip=ip_header[9]
+		tcpHeader=packet[20:]
+		unpack_arg = '!HHLLBBHHH' + str(pack_len) + 's'
+		if(pack_len % 2 == 1):						# if the len is a odd number, add 1
+			pack_len = pack_len + 1
+		pack_arg = '!HHLLBBHHH' + str(pack_len) + 's'
+		tcp_header=unpack(unpack_arg,tcpHeader)
+		recv_tcp_segment = pack(pack_arg,tcp_header[0],tcp_header[1],tcp_header[2],tcp_header[3],tcp_header[4],tcp_header[5],tcp_header[6],0,tcp_header[8],tcp_header[9])
+		psh = pack('!4s4sBBH' , source_ip , dest_ip , placeholder , protocol , tcp_length)
+		total_msg = psh + recv_tcp_segment
+		pack_checksum = tcp_header[7]
+		tcp_checksum = self.getchecksum(total_msg)
+		print str(pack_checksum)+"\t"+str(tcp_checksum)
+		return (pack_checksum == tcp_checksum)
+		
+		
+	# find a free source port
+	def getSourcePort(self) :
+		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		s.bind(('',0))
+		s.listen(1)
+		portNo = s.getsockname()[1]
+		s.close()
+		return portNo
+	
+	
+	# get the local ip address
+	def getSourceIp(self):
+		s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+		s.connect(("ccs.neu.edu",80))
+		source_ip=s.getsockname()[0]
+		s.close()
+		return source_ip
+	
+	
+	# write the packet Dictionary to file
+	def writeOutput(self):
+		writeFile = open(self.filename,"w")
+		count = 0
+		for eachKey in sorted(self.packetDict):
+			data = self.packetDict[eachKey]
+			if count == 1:
+				if "HTTP/1.1 200 OK" not in data:
+					writeFile.close()
+					os.remove(self.filename)
+					print "Status Code not 200"
+					sys.exit(2)
+				data = data.split("\r\n\r\n")[1]
+				
+			writeFile.write(data)
+			count+=1
+		writeFile.close()
+
+	
+	# parse url to get relative_path, filename and hostname
+	def parseUrl(self, argUrl) :
+		if "https://" in argUrl :
+			print "No Support for HTTPS"
+			sys.exit(2)
+		if "http://" not in argUrl :
+			argUrl = "http://"+argUrl
+		
+		if argUrl.endswith("/"):
+			argUrl=argUrl[:len(argUrl)-1]
+		self.url = argUrl
+		urlParts = argUrl.split("/")
+		self.hostname = urlParts[2]
+		self.relative_path=argUrl[len("http://"+self.hostname):]
+		self.filename = "index.html"
+		
+		if len(self.relative_path) == 0:
+			self.relative_path="/"
+
+		if len(urlParts)>3 :
+			lastPart = urlParts[len(urlParts)-1]
+			if "." in lastPart :
+				self.filename = lastPart
+		
+		
+	# create sockets to send and receive data
+	def createSockets(self):
+		try:
+			self.sendSock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+			self.recvSock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+		
+		except socket.error , msg:
+			print 'Socket could not be created. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
+			sys.exit()
+		
+	
+	# get ip and tcp headers from received packet
+	def getHeaders(self,recvPacket):
+		packet = recvPacket[0]
+		recvIpHeader = packet[0:20]
+		recv_ip_header = IpHeader()
+		recv_ip_header.extractIpHeader(recvIpHeader)
+		recvTcpHeader = packet[recv_ip_header.iph_length:recv_ip_header.iph_length+20]
+		recv_tcp_header = TcpHeader()
+		recv_tcp_header.extractTcpHeader(recvTcpHeader)
+		return recv_ip_header,recv_tcp_header		
+	
+	
+	# check congestion before sending packets
+	def checkCongestion(self,packet,pack_len):
+		if(self.cwnd >= 1000):
+			self.cwnd=1
+		else:
+			self.cwnd+=1
+		if(pack_len<self.cwnd*self.mss):
+			self.sendSock.sendto(packet, (self.dest_ip,self.source_port))
+		
+	
+	# return the packet to be sent from seq no, ack no, flags etc
+	def sendPacket(self, ip_id, seqno, ackno, fin_f, syn_f, ack_f, rst_f, psh_f, urg_f, data):
+		send_ip_header = IpHeader()
+		ip_header = send_ip_header.buildIpHeader(ip_id,self.source_ip,self.dest_ip)
+		send_tcp_header = TcpHeader()
+		send_tcp_header.setTcpHeader(self.source_port, self.dest_port, seqno, ackno, fin_f, syn_f, ack_f, rst_f, psh_f, urg_f, data)
+		tcp_header = send_tcp_header.buildTcpHeader(self.source_ip, self.dest_ip)
+		self.prev_seq_no = ackno
+		packet = ip_header + tcp_header + data
+		return packet,len(data)
+	
+	
+	# from the received packet, prepare the next packet to be send
+	def preparePacket(self, recv_ip_header, recv_tcp_header, packet) :
+
+		# deduce values from ip and tcp headers
+		h_size = recv_ip_header.iph_length+recv_tcp_header.tcp_offset_res*4
+		data = packet[h_size:]
+		seq_no = recv_tcp_header.tcp_ack_seq
+		ack_no = recv_tcp_header.tcp_seq + recv_ip_header.ip_tot_len - 40
+		fin_f= syn_f= rst_f= psh_f= urg_f= 0
+		ack_f= 1
+		user_data=""
+		
+		# if FIN ACK packet received start closing connection
+		if recv_tcp_header.tcp_fin == 1 and recv_tcp_header.tcp_ack == 1 :
+			self.close_flag = 1
+			self.close_seq = seq_no
+			self.close_ack = ack_no
+			ack_no +=1
+		
+		#if SYN ACK packet received send HTTP GET request
+		elif recv_tcp_header.tcp_syn == 1 and recv_tcp_header.tcp_ack == 1 :
+			psh_f = 1
+			user_data = "GET "+self.relative_path+" HTTP/1.0\nHost: "+self.hostname+"\r\n\r\n"
+			ack_no = recv_tcp_header.tcp_seq+1
+		
+		# store packet seq no and packet data in dictionary to sort and write to file in order
+		self.packetDict[recv_tcp_header.tcp_seq] = data
+		# create packet to be sent
+		return self.sendPacket(self.ip_id+1, seq_no, ack_no, fin_f, syn_f, ack_f, rst_f, psh_f, urg_f, user_data)
+		
+	
+	# receive packets after sending
+	def recvPacket(self) :
+		startTime = time.clock()
+		ack_visited = False
+		while True :
+			self.recvSock.settimeout(180)
+			try:
+				recvPacket = self.recvSock.recvfrom(65565) #receive packets
+			except:
+				print "Socket Timeout. No Packet Received"
+				self.sendSock.close()
+				self.recvSock.close()
+				sys.exit(2)
+			
+			rtt = time.clock() - startTime
+			
+			# retransmit packets if ack not received in 60 secs
+			if rtt>60 and not ack_visited:
+				print "retransmit"
+				self.sendSock.sendto(self.prevPacket, (self.dest_ip,self.source_port))
+			
+			# get ip and tcp headers
+			recv_ip_header, recv_tcp_header = self.getHeaders(recvPacket)
+			packet = recvPacket[0]
+			
+			# if ip header and tcp headers are fine send ACK packet
+			if recv_ip_header.ip_proto==6 and self.getchecksum(packet[0:20]) == 0 and recv_ip_header.ip_saddr == self.dest_ip and recv_ip_header.ip_daddr == self.source_ip :
+				if recv_tcp_header.tcp_source == self.dest_port and recv_tcp_header.tcp_dest == self.source_port and recv_tcp_header.tcp_ack == 1 :
+					if self.close_flag == 2:
+						return None
+					if recv_tcp_header.tcp_ack == 1 and recv_ip_header.ip_tot_len == 40 and recv_tcp_header.tcp_syn == 0 and recv_tcp_header.tcp_fin == 0 and recv_tcp_header.tcp_psh == 0: 
+						ack_visited = True
+						continue
+					
+					# if received packet is not in order then retransmit old ACK to receive the next packet in order.
+					if recv_tcp_header.tcp_seq == self.prev_seq_no or recv_tcp_header.tcp_syn == 1:
+						return self.preparePacket(recv_ip_header, recv_tcp_header, packet)
+					else :
+						self.sendSock.sendto(self.prevPacket, (self.dest_ip,self.source_port))
+						
+						
+	# establish connection and send syn packet
+	def establishConnection(self) :
+		#get syn packet
+		packet,pack_len = self.sendPacket(self.ip_id, 4321, 1234, 0, 1, 0, 0, 0, 0, "")
+		while True:
+			self.checkCongestion(packet,pack_len) #check congestion and send packet
+			self.prevPacket = packet # store packet for retransmission
+			
+			# close_flag for closing connection after FIN ACK
+			if self.close_flag == 2:
+				packet = self.recvPacket()
+				break
+			elif self.close_flag == 1:
+				self.close_flag = 2
+				packet,pack_len = self.sendPacket(self.ip_id+1, self.close_seq, self.close_ack, 1, 0, 1, 0, 0, 0, "")
+			else :
+				packet,pack_len = self.recvPacket() # recieve packets after sending
+			
+
+	def main(self):
+		self.source_port = self.getSourcePort()
+		self.source_ip = self.getSourceIp()
+		self.parseUrl(sys.argv[1])
+		self.createSockets()
+		try :
+			self.dest_ip =  socket.gethostbyname(self.hostname)
+		except :
+			self.sendSock.close()
+			self.recvSock.close()
+			print "hostname doesn't exist"
+			sys.exit(2)
+		
+		self.establishConnection()
+		self.sendSock.close()
+		self.recvSock.close()
+		self.writeOutput()	
+
+if __name__ == "__main__" :
+	r = RawHttpGet()
+	r.main()
+
+

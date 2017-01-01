@@ -1,0 +1,27 @@
+High Level Approach:
+- Extracted NUID and Password by reading arguments from command line.
+- Created a Set for Unique URLs and a Queue to add all URLs to be parsed.
+- Created a payload with username password and csrftoken to login into fakebook.
+- Handled wrong username and password by searching for the wrong username password message in the page.
+- Parsed the homepage, extracted URLs and all the new URLs were added into the set and queue.
+- As soon as we get a URL we check if exists in the Unique URLs set, if not then we add it into the set and the queue.
+- A URL existing in the set means it has been parsed before.
+- Iterated through the queue, parsed the page, extracted more URLs and added those URLs to the Queue and set only they were not parsed before.
+- While parsing the page we also check if there are any flags in the flags in the page. We stop as soon as we reach the count of 5 flags.
+- Handled 500 response code by iterating until it becomes 200.
+- Handled 40X response code by continuing with other URLs
+- 30X response code is handled by python by redirecting automatically
+
+
+Challenges:
+- Faced some trouble during login session and we did not know about csrftoken intially.
+
+
+Testing Code:
+Tested code using different scenaraios.
+- Tested without username and password.
+- Tested improper systax of running the program.
+- Tested improper username and password
+- Handled all status codes. Iterated until status code 500 turns to 200.
+- Handled all network issues like unable to create sessions etc.
+

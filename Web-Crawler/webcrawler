@@ -1,0 +1,144 @@
+#! /usr/bin/python
+import sys, socket
+from sets import Set
+from Queue import Queue
+
+def parseText(text) : # function to parse the source code of a page.
+	global currentUrlsQueue, uniqueUrlsSet, flagCount
+	
+	flagsList = text.split('<h2 class=\'secret_flag\' style="color:red">FLAG: ') # searching for Flags in the page.
+	
+	for eachFlag in flagsList[1:len(flagsList)] : # checking for multiple flags in a page
+		print eachFlag.split('</h2>')[0] # printing the flags
+		flagCount +=1 # counting the number of flags till now.
+		if flagCount == 5 : # checking if all the 5 flags are printed
+			sys.exit(0) # exit if all 5 flags are printed.
+	
+	hrefList = text.split('href=\"/fakebook/') # searching for fakebook links in the page.
+	
+	for each in hrefList[1:] : # checking for multiple links in single page
+		eachList = each.split('\">') # extracting the url from the text.
+		
+		if eachList[0] not in uniqueUrlsSet : # checking if the URL is not parsed before
+			uniqueUrlsSet.add(eachList[0]) # adding the URL to unique URLs set
+			currentUrlsQueue.put(eachList[0]) # adding URL to queue to be parsed later.
+
+
+def crawl() :
+	global currentUrlsQueue, uniqueUrlsSet, csrf_token, session_id, hostname 
+	while not currentUrlsQueue.empty(): # iterating until there are no urls to iterate
+		
+		currentUrl = currentUrlsQueue.get()
+		currentUrl = "http://cs5700f16.ccs.neu.edu/fakebook/"+currentUrl # appending relative url to domain
+		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # creating socket
+		s.connect((hostname,port)) # connecting to host
+		# creating payload
+		socket_send= ("GET " + currentUrl + " HTTP/1.1\n" + "Host:" +  hostname + "\r\nCookie: csrftoken="+ csrf_token +";sessionid="+session_id+";\r\n\r\n")
+		s.send(socket_send) # sending payload to host
+		response = s.recv(4096) # receiving data from host
+		s.close() # closing socket
+		line1_response = response.splitlines()[0]
+		
+		if ("HTTP/1.1 301 " in line1_response) or ("HTTP/1.1 302 " in line1_response) : # redirect if status code is 301/302
+			response = redirect_response(response.split())
+	
+		if ("HTTP/1.1 403 " in line1_response) or ("HTTP/1.1 404 " in line1_response) : 
+			continue # continue with next url if current url's response code is 403 or 404
+	
+		while "HTTP/1.1 500 " in line1_response : # keep of trying if the status code is 500
+			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			s.connect((hostname,port))		
+			socket_send= ("GET " + currentUrl + " HTTP/1.1\n" + "Host:" +  hostname + "\r\nCookie: csrftoken="+ csrf_token +";sessionid="+session_id+";\r\n\r\n")
+			s.send(socket_send)
+			response = s.recv(4096)
+			s.close()
+			line1_response = response.splitlines()[0]
+
+		parseText(response) # parse the source code of the page.
+
+
+def redirect_response(response) : # find new location and redirect
+	global hostname,port,session_id
+	location_next = False
+	count = 0
+
+	for each in response :
+		#pdb.set_trace()
+		if location_next :
+			location=each
+			location_next=False
+			count+=1
+		if "Location" in each : # find new location to redirect
+			location_next=True
+		if "sessionid=" in each : # get session id
+			session_id=each[10:len(each)-1]
+			count+=1
+		if count == 2 :
+			break
+	
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	s.connect((hostname,port))
+	socket_send = ("GET " + location + " HTTP/1.1\n" + "Host:" +  hostname + "\r\nCookie: csrftoken="+ csrf_token +";sessionid="+session_id+";\r\n\r\n")
+	s.send(socket_send)
+	response = s.recv(4096)
+	s.close()	
+	return response
+
+
+def init() :
+	global hostname,port,csrf_token,session_id 
+	hostname="cs5700f16.ccs.neu.edu"
+	url="http://cs5700f16.ccs.neu.edu/accounts/login/?next=/fakebook/"
+	port = 80
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket
+	s.connect((hostname,port)) # connect to host
+	first_get= ("GET" + " %s" +  " HTTP/1.1\n" + "Host:" +  hostname +"\r\n\r\n")%url
+	s.send(first_get) # create payload and send to host
+	response = s.recv(4096).split()
+	s.close()	
+	count = 0;
+	for each in response : # get csrftoken and session id
+		if "csrftoken=" in each :
+			csrf_token=each[10:len(each)-1]
+			count+=1
+		if "sessionid=" in each :
+			session_id1=each[10:len(each)-1]
+			count+=1
+		if count == 2 :
+			break
+	
+	try : # check username and password for login 
+		username = sys.argv[1]
+		password = sys.argv[2]
+	except :
+		print "Usage: ./webcrawler [username] [password]"
+		sys.exit(2)
+	
+	# create socket and connect
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	s.connect((hostname,port))
+	
+	# create payload to login into fakebook
+	data = "csrfmiddlewaretoken="+csrf_token+"&"+"username="+username+"&"+"password="+password+"&"+"next="+"%2Ffakebook%2F"
+	post_req= "POST /accounts/login/ HTTP/1.1\r\n"+"Host: cs5700f16.ccs.neu.edu\r\n"+"Content-Length: 109\r\n"+"Content-Type: application/x-www-form-urlencoded\r\n"+"Cookie: csrftoken="+ csrf_token +";sessionid="+ session_id1 + ";\r\n\r\n"+ data
+	s.send(post_req)
+	response = s.recv(4096)
+	s.close() # receive and close socket
+	
+	while ("HTTP/1.1 301 " in response) or ("HTTP/1.1 302 " in response) :
+		response= redirect_response(response.split()) # redirect if status code is 301/302
+
+	if "Please enter a correct username and password. Note that both fields are case-sensitive." in response :
+		print "Please enter correct username and password"
+		sys.exit(2)
+
+	parseText(response) # parse the source code of the page
+	
+
+if __name__ == "__main__" : 
+	uniqueUrlsSet = Set() #Set to store unique URLs
+	currentUrlsQueue = Queue() #Queue to add new URLs while crwaling.
+	flagCount = 0 # variable to count the number of flags printed
+	init() # initiliaze set queue and other varibale and login into fakebook
+	crawl() # crawl all the unique urls in fakebook
+

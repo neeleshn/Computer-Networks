@@ -1,0 +1,48 @@
+High Level Approach:
+- The main goal of the paper is to analyze the behaviour of TCP variants Tahoe, Reno , New Reno , Vegas under congestion.
+
+First Experiment:
+
+Here we analyzed the throughput , latency and packet drop rate of TCP variants Tahoe, Reno ,New Reno and Vegas by varying the CBR at rate of 1 Mbps.
+We also varied packet size and time of TCP ,CBR flows to get more samples of data for result analysis.
+We were able to answer the questions based on result analysis.
+Which has fewest drops ? Which has highest average throughput ? Which has the lowest average latency? 
+Is there an overall "best" TCP variant in this experiment, or does the "best" variant vary depending on other circumstances?
+
+Second Experiment:
+
+Here we compared throughput , latency and packet drop rate parameters of TCP variant pairs New Reno/Reno , New Reno / Vegas , Reno / Reno and  Vegas/Vegas by varying the CBR at rate of 1Mbps.
+We also varied the start time of two TCP flows to anlyze the results.
+Based on results we were able to answer the following questions.
+Are the different combinations of variants fair to each other? Are there combinations that are unfair, and if so, why is the combination unfair? To explain unfairness, you will need to think critically about how the protocols are implemented and why the different choices in different TCP variants can impact fairness.
+
+Third Experiment:
+
+Here we compared the queueing algorithms RED,Drop Tail on TCP variants SACK and Reno and compared the throught
+We compared the throughput of TCP Reno / SACK by varying time on different queueing algorithms.
+We answered the following questions based on analysis.
+
+Does each queuing discipline provide fair bandwidth to each flow?
+How does the end-to-end latency for the flows differ between DropTail and RED?
+How does the TCP flow react to the creation of the CBR flow?
+Is RED a good idea while dealing with SACK?
+
+Result analysis:
+For all experiments, we used T-tests and plotted error bars on excel to understand the results. 
+You can run the experiment by going into 1exp , 2 exp , 3exp folders and executing the respective python script as shown below.
+$ python py1exp.py     #For experiment 1
+$ python py2exp.py     #For experiment 2 
+$ python py3exp.py     #For experiment 3
+
+After running the script, we plotted the results on excel from results folder for respective experiment. 
+
+Challenges:
+1. Writing code for latency in python becasue we need to consider ack for respective packets ignoring the dropped packets. 
+2. Writing paper in standard format and efficiently utlizing the overall space along with graphs.
+3. Knowing the exact meanings to each term. eg: end to end latency had different meanings
+4. Learning NS2 initially was challenging.
+
+Testing the Code:
+Tested the python code on CCIS machine.
+Tested the code by varying delay, packet size,queue size parameters in tcl script. 
+Everything in the code is hard coded and needs no changes. So there are no errors.

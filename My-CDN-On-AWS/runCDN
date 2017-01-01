@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+# read arguments
+while getopts "p:o:n:u:i:" opt; do
+	case $opt in
+	p)
+		port=$OPTARG
+		;;
+	o)
+		origin=$OPTARG
+		;;
+	n)
+		name=$OPTARG
+		;;
+	u)
+		user=$OPTARG
+		;;
+	i)
+		key=$OPTARG
+		;;
+	?)
+		echo "Invalid Usage"
+		exit 1
+		;;
+	esac
+done
+
+# replica servers
+servers=("54.210.1.206"
+"54.67.25.76"
+"35.161.203.105" 
+"52.213.13.179" 
+"52.196.161.198"
+"54.255.148.115"
+"13.54.30.86"
+"52.67.177.90"
+"35.156.54.135")
+
+# ssh into replica servers and run httpserver
+for server in "${servers[@]}"
+do
+	ssh -i $key $user@$server -o StrictHostKeyChecking=no "cd nr_http && ./httpserver -p $port -o $origin > /dev/null 2>&1 &" &
+done
+
+# ssh into ccs server and run dnsserver
+ssh -i $key $user@cs5700cdnproject.ccs.neu.edu "cd nr_dns && ./dnsserver -p $port -n $name > /dev/null 2>&1 &" &
+
+

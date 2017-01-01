@@ -1,0 +1,57 @@
+PROJECT 5 : CDN Project
+
+DNS Server Implementation:
+
+High Level Approach:
+1)Implemented the DNS server on cs5700cdnproject.ccs.neu.edu by using the below command.
+./dnsserver -p <port> -n <name>
+Here port is port number on which the server runs and name is domain name that our server translates to IP.
+2)Server listens for DNS Type A queries for domain name(e.g, cs5700cdn.example.com) on the port given in the arguments.
+3)Extracted the packet and looked for the specific domain name. Built the DNS Answer packet with appropriate flags and IP address of the replica server.
+4)Client to replica mapping is based on nearest replica server based on geographic distance calculated from client to replica servers.  
+5)Send the DNS response packet with answer field as nearest replica server to client.
+
+Performance Enhancing technique:
+1)We have taken geographical location of client and replica sever location based on online real time database. Calculated the nearest distance from client to replica server.
+2)We have stored client and nearest sever mapping in dictionary.Clients who have queried more than once will get nearest server from dictionary in O(1).
+
+Challenges Faced:
+1)Mapping IP address to client location was tricky and have researched lot of databases online to get accurate data.
+2)Finding formula to calculate distance between two data points is little complicated becuase we have to include earth radius/circumference in calculation.
+ 
+HTTP Server Implementation:
+   
+High Level Approach:
+1)Implemented the HTTP server with port number and origin server as inputs.
+2)Server listens for get requests of the urls on the specific port we bind.
+3)We have implemnted cache using SQLITE3 database.We store url,compressed html data, frequency and recent time stamp for corresponding url into the database. 
+4)If Http server has cache of the requested data in database, it returns data to the user. Otherwise it fetches the data from origin server and returns the data to client.
+5)We have taken frequency of each url requested in cache database and evicted url that has been less requested by sorting based on count.
+6)We do not store the urls in the cache until it's frequency is > 2.
+7)If the cache reaches its maximum limit we remove the url with least frequency. If there are multiple urls with same least frequency then the least recently hit url is evicted.
+
+Performance Enhancing Techniques:
+1)Implemented LFU since zipf distribution is based on frequency.
+2)Used sqlite3 database for storing url data in the cache. 
+
+Challenges:
+1)Finding the size of cache database on disk and making sure overall disk size is less than 10MB.
+2)Implementing the cache algorithm based on LFU.
+3)All operations related to database were challenging. Finding size of db was the toughest.
+4)Testing with many unique URLs in wiki page.
+5)Executing deploy,run and stop CDN scripts and testing the HTTP server.    
+	
+
+EXECUTION STEPS:
+1) make
+2) ./deployCDN -p <port> -o <origin> -n <name> -u <username> -i <keyfile>
+eg: ./deployCDN -p 52323 -o ec2-54-167-4-20.compute-1.amazonaws.com -n cs5700cdn.example.com -u rkurapati -i id_rsa
+3) ./runCDN -p <port> -o <origin> -n <name> -u <username> -i <keyfile>
+eg: ./runCDN -p 52323 -o ec2-54-167-4-20.compute-1.amazonaws.com -n cs5700cdn.example.com -u rkurapati -i id_rsa
+4) dig @DNS-HOST -p <port> -n CDNNAME
+eg: dig @cs5700cdnproject.ccs.neu.edu -p 52323 -n cs5700cdn.example.com
+5) wget http://replica_server_ip:port/[path_to_content]
+eg: wget http://54.210.1.206:52323/wiki/India
+5) ./stopCDN -p <port> -o <origin> -n <name> -u <username> -i <keyfile>
+eg: ./stopCDN -p 52323 -o ec2-54-167-4-20.compute-1.amazonaws.com -n cs5700cdn.example.com -u rkurapati -i id_rsa
+

@@ -1,0 +1,41 @@
+Approach:
+
+1.We began the project by revisting the concepts of TCP initaition(SYN,SYNACK,ACK), TCP Transmission(Data Packets) and TCP teardown(Fin,ACK process). 
+2.Observed the wireshark trace for downloading a file to check the various fields like TCP checksum and IP Header checksum for calculation of checksum.
+3.Implemented the program by creating separate sockets for sending and receiving.
+4.We followed the Silver Moon's tutorial  for creation and extraction of IP heders, TCP headers.
+5.Once packet is constructed , we sent HTTP request(reference from our project2 implementation) for downloading the file on created socket after TCP 3 way hand shake.
+6.After recieving the data from server, we calculated the sequence and acknowledge numbers for sending ACK packets .
+7.We implemented basic time out functionality for retransimission.Also, handled lost packets from server and out of order sequence packets.
+8.Once we recieved all the packets successfully, we implemnted the tear down process by sending and recieving FIN,ACK.
+
+Features Implemented:
+
+1.HTTP - We implemented the HTTP get requested and verified the response 200 from the server
+2.TCP  
+	a.TCP Inital Handhsake (SYN, SYNACK, ACK)
+	b.TCP checksum validation for incoming packets and calculation for outgoing packets
+	c.Basic Timeout functionality if packet not Acked in 1 min.
+	d.Identify and remove duplicate packets, arrange the packets in sequential order
+	e.TCP congestion window with cwnd=1 and increment till 1000 after successful ACK.Set cwnd to 1 in case of packet drop or time out.
+	f.TCP teardown by sending the FIN,ACK and ACK messages 
+3.IP
+	a.constructed the IP header for outgoing packets and extracted the IP header for incoming packets 	
+	b.Calculated Ip header checksum and filtered the based on local IP and server IP
+
+Challenges Faced:
+1.Checksum calculation is bit tricky and need to search a lot of resources online to get the code working.
+2.Implementation of congestion window 
+3.Got unexpected characters between the lines while using HTTP 1.1 but issue was resolved after using HTTP 1.0
+4.Spent a lot of time in dealing with sequence numbers and acknowldgement numbers during the connection
+
+Testing:
+1.We tested the code by downloading files of size project4.php page,2MB,10MB,50MB and validated respective files by downlaoding pages with wget and checking diff
+2.We tested the code by downloading files on slow and high speed networks like wifi,lan connection 
+
+Running the code:
+
+1.make
+2. ./rawhttpget [URL]
+
+
